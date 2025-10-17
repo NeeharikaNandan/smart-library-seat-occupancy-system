@@ -1,0 +1,163 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+
+// ---------------------- WiFi ----------------------
+const char* ssid = "Neeha m35";
+const char* password = "ch3cooh@#10";
+
+// ---------------------- Server ----------------------
+const char* serverURL_break = "https://seat-tracker-4.onrender.com/break";
+const char* serverURL_status = "https://seat-tracker-4.onrender.com/update-seat";
+
+// ---------------------- Pins ----------------------
+#define CAP1_PIN 19
+#define CAP2_PIN 18
+#define FSR1_PIN 34
+#define FSR2_PIN 35
+
+// ---------------------- Settings ----------------------
+const int FSR_THRESHOLD = 50;        // Lower = more sensitive
+const unsigned long BREAK_DURATION = 5 * 60 * 1000; // 5 min
+const unsigned long DEBOUNCE_TIME = 2000;
+const unsigned long STATUS_SEND_INTERVAL = 1500;
+
+// ---------------------- Variables ----------------------
+bool breakActive1 = false, breakActive2 = false;
+unsigned long breakEnd1 = 0, breakEnd2 = 0;
+unsigned long lastTouch1 = 0, lastTouch2 = 0;
+unsigned long lastDisplay = 0, lastSend = 0;
+
+// ---------------------- Setup ----------------------
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  pinMode(CAP1_PIN, INPUT);
+  pinMode(CAP2_PIN, INPUT);
+
+  analogSetPinAttenuation(FSR1_PIN, ADC_11db);
+  analogSetPinAttenuation(FSR2_PIN, ADC_11db);
+  analogReadResolution(12);
+
+  Serial.println("\n=== ESP32 Smart Seat System (FSR + Capacitive + HTTPS) ===");
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\n✅ WiFi connected!");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+// ---------------------- Loop ----------------------
+void loop() {
+  unsigned long now = millis();
+
+  // ---------- FSR Readings ----------
+  int raw1 = analogRead(FSR1_PIN);
+  int raw2 = analogRead(FSR2_PIN);
+  float voltage1 = (raw1 / 4095.0) * 3.3;
+  float voltage2 = (raw2 / 4095.0) * 3.3;
+  bool seat1Pressed = (raw1 > FSR_THRESHOLD);
+  bool seat2Pressed = (raw2 > FSR_THRESHOLD);
+
+  // ---------- Capacitive Readings ----------
+  int cap1 = digitalRead(CAP1_PIN);
+  int cap2 = digitalRead(CAP2_PIN);
+
+  // Break triggers (capacitive touch)
+  if (!breakActive1 && cap1 == HIGH && now - lastTouch1 > DEBOUNCE_TIME) {
+    lastTouch1 = now;
+    triggerBreak("seat1");
+    breakActive1 = true;
+    breakEnd1 = now + BREAK_DURATION;
+  }
+
+  if (!breakActive2 && cap2 == HIGH && now - lastTouch2 > DEBOUNCE_TIME) {
+    lastTouch2 = now;
+    triggerBreak("seat2");
+    breakActive2 = true;
+    breakEnd2 = now + BREAK_DURATION;
+  }
+
+  // End break automatically
+  if (breakActive1 && now >= breakEnd1) { breakActive1 = false; Serial.println("✅ Seat 1 break ended."); }
+  if (breakActive2 && now >= breakEnd2) { breakActive2 = false; Serial.println("✅ Seat 2 break ended."); }
+
+  // ---------- Color Logic ----------
+  String seat1Color, seat2Color;
+
+  if (breakActive1) seat1Color = "yellow"; // break time
+  else seat1Color = seat1Pressed ? "orange" : "green"; // orange = occupied, green = vacant
+
+  if (breakActive2) seat2Color = "yellow";
+  else seat2Color = seat2Pressed ? "orange" : "green";
+
+  // ---------- Serial Monitor ----------
+  if (now - lastDisplay > 1000) {
+    lastDisplay = now;
+    Serial.printf("FSR1: raw=%d V=%.2f → %s | FSR2: raw=%d V=%.2f → %s\n",
+                  raw1, voltage1, seat1Color.c_str(),
+                  raw2, voltage2, seat2Color.c_str());
+    if (breakActive1) {
+      unsigned long rem = breakEnd1 - now;
+      Serial.printf("⏳ Seat 1 Break — %02lu:%02lu left\n", rem / 60000, (rem / 1000) % 60);
+    }
+    if (breakActive2) {
+      unsigned long rem = breakEnd2 - now;
+      Serial.printf("⏳ Seat 2 Break — %02lu:%02lu left\n", rem / 60000, (rem / 1000) % 60);
+    }
+  }
+
+  // ---------- Send Data to Website ----------
+  if (now - lastSend > STATUS_SEND_INTERVAL) {
+    sendSeatStatus("seat1", seat1Color);
+    sendSeatStatus("seat2", seat2Color);
+    lastSend = now;
+  }
+
+  delay(300);
+}
+
+// ---------------------- Break Function ----------------------
+void triggerBreak(String seatId) {
+  Serial.printf("👆 Touch on %s — Break triggered!\n", seatId.c_str());
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.begin(client, serverURL_break);
+  http.addHeader("Content-Type", "application/json");
+
+  String payload = "{\"seatId\":\"" + seatId + "\",\"minutes\":5}";
+  int code = http.POST(payload);
+
+  Serial.println("-------------------------------------------");
+  Serial.printf("POST %s\nPayload: %s\nResponse: %d\n", serverURL_break, payload.c_str(), code);
+  if (code > 0) Serial.println(http.getString());
+  else Serial.println("❌ HTTP request failed!");
+  Serial.println("-------------------------------------------");
+
+  http.end();
+}
+
+// ---------------------- Seat Status Function ----------------------
+void sendSeatStatus(String seatId, String color) {
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.begin(client, serverURL_status);
+  http.addHeader("Content-Type", "application/json");
+
+  String payload = "{\"seatId\":\"" + seatId + "\",\"status\":\"" + color + "\"}";
+  int code = http.POST(payload);
+
+  Serial.printf("➡ %s → %s | HTTP %d\n", seatId.c_str(), color.c_str(), code);
+  http.end();
+}
