@@ -1,0 +1,46 @@
+# ===== Arduino / ESP32 =====
+*.bin
+*.elf
+*.hex
+*.map
+*.eep
+*.pyc
+*.pyo
+*.bak
+*.tmp
+*.DS_Store
+
+# Arduino build and cache folders
+build/
+*.ino.cpp
+*.arduino_build_*/
+*.arduino_save_*/
+*.vscode/
+
+# ===== Node.js / Web Backend (if any) =====
+node_modules/
+.env
+npm-debug.log
+yarn-error.log
+
+# ===== Frontend =====
+dist/
+.cache/
+*.log
+
+# ===== System files =====
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ===== Misc =====
+*.zip
+*.rar
+*.tar
+*.7z
+
+# ===== IDE / Editor files =====
+.vscode/
+.idea/
+*.swp
+*.swo
