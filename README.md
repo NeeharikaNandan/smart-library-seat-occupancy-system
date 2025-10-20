@@ -136,5 +136,6 @@ This project welcomes:
 ---
 
 > Developed as an innovative IoT solution to optimize library seat management with real-time monitoring, smart break-time logic, and potential for magnetic chair locking system integration.
+> note:we have done this project using http and hosted it by render,which is bit basic it can be made way better with event driven websocket for more varied interfaces and way better response times and multi detection and we are going to implement this in future
 
   
